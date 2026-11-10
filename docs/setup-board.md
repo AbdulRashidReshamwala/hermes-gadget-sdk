@@ -56,6 +56,12 @@ hermes gadget update "Kitchen" --latest
 
 `--latest` installs the newest release only on a device that runs an older version. A device on that version or a newer one, including a source build such as `0.4.0-12-gabc1234`, is left alone, and a device whose version can't be read is refused; `hermes gadget update "Kitchen" --latest --force` installs the release anyway. The plugin and the device both refuse an image built for another board, so a wrong `--board` or file cannot be installed. For a custom build, follow [Build and flash](hardware.md#build-and-flash). For USB configuration from the SDK checkout, install the serial extra with `python -m pip install -e ".[serial]"` and use `hermes-gadget provision --help`.
 
+To send your own build from another computer, use `tools/gadget-ota.sh`. It copies the app image to the Hermes machine and runs the update there; `--container` is for Hermes in Docker and `--sudo` for a machine where Docker needs root:
+
+```bash
+tools/gadget-ota.sh --host me@hermes-box --container hermes --sudo "Kitchen" hermes_gadget.bin
+```
+
 ## Set up Wi-Fi with your phone
 
 Phone setup configures a board that already runs the firmware. A board without a saved Wi-Fi network opens setup automatically at startup. To change an existing connection, open [device settings](using-gadget.md#device-settings-and-hardware-checks) and select **Wi-Fi setup**.
