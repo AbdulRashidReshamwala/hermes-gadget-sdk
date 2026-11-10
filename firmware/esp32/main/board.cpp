@@ -70,6 +70,8 @@ namespace {
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.83"
 #elif CONFIG_HG_BOARD_ESP32_CYD
 #define HG_BOARD_NAME "esp32-2432s028-cyd"
+#elif CONFIG_HG_BOARD_CHEEKO_GOTCHI
+#define HG_BOARD_NAME "cheeko-gotchi"
 #else
 #define HG_BOARD_NAME "custom"
 #endif
@@ -1507,6 +1509,74 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "G0";
   b.cancel_label = "Fn+Esc";
+  return b;
+}
+#elif CONFIG_HG_BOARD_CHEEKO_GOTCHI
+// Cheeko Gotchi v1.2 (experimental): ESP32-S3 with
+// 16 MB flash and 8 MB octal PSRAM, 2.01" 240x296 JD9853 over SPI, CST810 touch, ES8311
+// speaker (its ADC is not wired) and ES7210 microphones (MIC1 and MIC2; MIC3 is the speaker
+// loopback), a LIS2DH12 accelerometer (not driven), native USB-Serial/JTAG.
+// Pins and values: https://github.com/ALTIO-AI-PRIVATE-LIMITED/cheeko-gotchi at
+// 813fb6d221cd09e2f492e7cb169bf183685ddeea, firmware/hardware_test/main/cheeko_self_test.c.
+// Pins: docs/hardware.md#cheeko-gotchi-v12
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  // POWER_OFF (GPIO 2) must be LOW to keep the unit powered; HIGH cuts the power. A power
+  // rail with on_level false drives it low at the start of app_main and nothing releases
+  // it. The battery latch (LatchPowerConfig) is deliberately NOT used: it drives its enable
+  // pin HIGH to keep power, which here would switch the unit off. So there is no battery
+  // reading, no charge signal (GPIO 37 is also the octal PSRAM's DQS line) and no software
+  // power-off.
+  b.power_rails[0] = {2, false};
+  b.light_sleep = true;  // dozing on battery; keep_pins_through_sleep holds GPIO 2 low
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Jd9853;
+  // Landscape, rotated 90 degrees counter-clockwise from the panel's portrait.
+  b.lcd.width = 296;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = true;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = true;
+  b.lcd.gap_x = 24;  // the controller's memory is 320 rows tall; the glass shows 296 of them
+  b.lcd.invert = false;
+  b.lcd.bgr = false;  // measured: true swaps red and blue on this panel
+  b.lcd.mosi = 10;
+  b.lcd.sclk = 9;
+  b.lcd.cs = 14;
+  b.lcd.dc = 8;
+  b.lcd.rst = 17;
+  b.lcd.backlight = 13;  // active high; no MISO
+  b.lcd.spi_mhz = 40;
+  b.lcd.corner_inset = 44;  // the glass has very large rounded corners
+  b.lcd.pet = true;
+  b.i2c = {12, 11, 400000};  // SDA, SCL: CST810 0x15, ES8311 0x18, LIS2DH12 0x19, ES7210 0x40
+  b.codec.enabled = true;
+  b.codec.mclk = 5;
+  b.codec.bclk = 15;
+  b.codec.ws = 16;
+  b.codec.dout = 6;
+  b.codec.din = 7;
+  b.codec.pa = 4;               // NS4150B enable, active high
+  b.codec.speaker_pa = true;    // the port keeps it off while idle, so an idle I2S line can't hiss
+  b.codec.es7210_mics = 0x03;   // MIC1 and MIC2. MIC3 is the speaker loopback and stays off.
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst810;  // INT on GPIO 1; the driver polls
+  b.touch.addr = 0x15;
+  b.touch.width = 296;
+  b.touch.height = 240;
+  // The glass is rotated 90 degrees against the panel's portrait, so its raw axes already
+  // match this landscape orientation. UNVERIFIED direction signs (docs/hardware.md).
+  b.touch.swap_xy = false;
+  b.touch.mirror_x = false;
+  b.touch.mirror_y = false;
+  b.touch.ppi = 190;  // estimate (see TouchConfig::ppi): 296x240 across a 2.01 inch diagonal
+  // VOL+ (GPIO 40) and VOL- (GPIO 39) are active low. BOOT (GPIO 0) may not be reachable
+  // through the case, so the screen is the talk input. POWER_KEY (GPIO 3) is active high with
+  // an external pulldown, which the active-low button driver cannot read.
+  b.buttons = {-1, -1, 40, 39};
+  b.talk_label = "Hold screen";
+  b.cancel_label = "Swipe down";
   return b;
 }
 #elif CONFIG_HG_BOARD_CUSTOM

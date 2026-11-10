@@ -388,6 +388,72 @@ Run the [hardware checklist](hardware-validation.md) for the exact panel revisio
 
 References: [Espressif hardware overview](https://github.com/espressif/esp-box/blob/master/docs/hardware_overview/esp32_s3_box_3/hardware_overview_for_box_3.md) and [board definitions](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3). Display and touch drivers keep their Apache 2.0 license; see [README](../README.md#license) and the license archive distributed with firmware releases.
 
+## Cheeko Gotchi v1.2
+
+Board option `cheeko-gotchi`, for the Cheeko Gotchi v1.2 handheld: an ESP32-S3 with 16 MB flash and 8 MB octal PSRAM, a 2.01" 240×296 JD9853 panel over SPI, a CST810 touchscreen, an ES8311 speaker codec, an ES7210 microphone ADC and a LIS2DH12 accelerometer. The console is the S3's own USB Serial/JTAG. This port is experimental. It compiles, but this firmware has not been flashed to or run on a board. Every value below comes from another project's hardware test ([ALTIO-AI-PRIVATE-LIMITED/cheeko-gotchi](https://github.com/ALTIO-AI-PRIVATE-LIMITED/cheeko-gotchi) at commit `813fb6d221cd09e2f492e7cb169bf183685ddeea`), which did run on a real unit, with PSRAM off. See [what is unverified](#cheeko-gotchi-v12-what-is-unverified).
+
+**Back up the whole flash before the first flash.** Read it without the flasher stub, which stops this board's USB Serial/JTAG reads near offset `0x7000`; if the port drops mid-transfer, read in 1 MB pieces:
+
+```bash
+esptool.py --chip esp32s3 --port PORT --no-stub read_flash 0 0x1000000 cheeko-gotchi-factory.bin
+```
+
+Check first that `esptool.py --chip esp32s3 --port PORT flash_id` reports 16 MB. The reference project's notes say some units enumerate as 8 MB. The partition table here uses only the first 4 MB.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | JD9853, SPI | MOSI 10, SCLK 9, CS 14, DC 8, RST 17; no MISO; 40 MHz, SPI mode 0; BGR (MADCTL 0x08), no mirroring, no axis swap, inversion off; backlight GPIO 13, active high |
+| I2C | | SDA 12, SCL 11, 400 kHz; CST810 0x15, ES8311 0x18, LIS2DH12 0x19, ES7210 0x40 |
+| Speaker DAC | ES8311 | I2S MCLK 5, BCLK 15, WS 16, DOUT 6; amplifier (NS4150B) enable GPIO 4, active high. The ES8311's own ADC is not wired |
+| Microphone ADC | ES7210 | I2S DIN 7; MIC1 and MIC2 are the microphones, MIC3 is the speaker loopback and stays off |
+| Touch | CST810 | I2C 0x15; INT GPIO 1 (not used: the driver polls) |
+| Keys | | VOL+ GPIO 40 (Up) and VOL- GPIO 39 (Down), active low. BOOT GPIO 0 and POWER_KEY GPIO 3 are not read |
+| Power hold | | POWER_OFF GPIO 2, driven low at boot |
+
+Hold the screen to talk, tap to answer yes, and swipe down to cancel. VOL+ and VOL- scroll lists. BOOT (GPIO 0) is often not reachable through the case, so it is not a talk button. POWER_KEY (GPIO 3) is active high with an external pulldown, which the firmware's active-low button driver cannot read, so it does nothing.
+
+**Power.** POWER_OFF (GPIO 2) keeps the unit powered while low and cuts the power when high, so the firmware drives it low at the start of `app_main` and nothing raises it. This profile does not use the battery latch (`LatchPowerConfig`), which drives its enable pin high to keep power and would switch this unit off. There is no battery reading, no charge state (GPIO 37 is also the octal PSRAM's DQS line, and its polarity has not been recorded) and no software power-off.
+
+**Not supported:** the LIS2DH12 accelerometer (the repository has no driver for it, so no face-down sleep or motion), the power key, BOOT as a key, charge detection, battery readings, software power-off and light sleep.
+
+The glass is 240×296. To preview that layout, run `hermes-gadget sim --board sim-240x296`; the simulator shows the screen size and controls only.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e cheeko-gotchi -t upload -t monitor
+```
+
+Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/cheeko-gotchi/sdkconfig.defaults" build` in a separate build directory with its own `SDKCONFIG`. After flashing over USB, unplug the cable and plug it back in: the reference project found that a reset from the computer leaves this board in download mode, so the new firmware only starts after a power cycle. Phone setup, pairing and OTA use the same flows as the other ESP32 boards.
+
+### Cheeko Gotchi v1.2: what is unverified
+
+This profile has not been run with this firmware, so each of these is an assumption until the first-flash checks below pass.
+
+- **Touch axes.** The glass is rotated 90° against the display. The profile exchanges the raw X and Y, then flips the vertical axis (`swap_xy` and `mirror_y`). The signs come from the reference project's `SKILL.md`, measured on one unit with a different display initialization (MADCTL 0x40 and a generic ST7789 sequence); the reference's hardware test, which runs the JD9853 table at MADCTL 0x08, calibrates the mapping on the unit at run time and records no values. That calibration is not carried over. The profile clamps to the screen and applies no scale or offset, while the measured fit in `SKILL.md` has a 0.85 gain on one axis and an offset on both, so touches near the left and right edges can land about 15 pixels off.
+- **PSRAM.** Octal mode at 80 MHz is selected, matching `esptool`'s "Embedded PSRAM 8MB" and `SKILL.md`'s `opi`, and `SPIRAM_IGNORE_NOTFOUND` lets the firmware boot without it. The reference hardware test ran with PSRAM off, so no working code has used it on this board. `SKILL.md` also names the chip an ESP32-S3R2, which would be 2 MB of quad PSRAM; the unit's `esptool` output says 8 MB.
+- **Microphones.** `es7210_mics` selects MIC1 and MIC2, as the reference's register setup enables them. Capture is mono from the first I2S slot, as on the BOX-3; which of the two microphones that is has not been checked. The gain is the default 24 dB, not the reference's 30 dB.
+- **Speaker.** The amplifier is switched on only while sound plays, so an idle I2S line cannot hiss; the reference leaves it on. The codec's output level assumes a 5 V amplifier supply, the default, and the Gotchi's supply voltage has not been checked.
+- **Display.** The panel's start-up table is the reference's, unchanged, and the port also sends inversion off after it, which the reference does not. Backlight brightness uses 5 kHz PWM on GPIO 13; the reference only switched it on and off.
+- **Power hold.** GPIO 2 is driven low a little after the bootloader and NVS start, the same order as the reference. It has not been checked that the unit stays powered without USB, on battery, or through an OTA restart.
+- **Flash.** The profile is 16 MB, as `esptool` reported; see the note above.
+
+### First flash: what to check
+
+1. **Boot log:** `Hermes Gadget … on cheeko-gotchi`, `jd9853 240x296 ready`, `codecs: speaker ready, microphones ready` and `touch ready`. A `no PSRAM found` error means the octal PSRAM did not start. `hermes-gadget diag` should list `display jd9853`, `microphone es7210`, `speaker es8311` and I2C devices `0x15`, `0x18`, `0x19` and `0x40`.
+2. **Power:** the unit stays on after the power key is released, on USB and on battery. Reset it (a power cycle, or an OTA update) and check it survives.
+3. **Screen:** the mascot is upright and not mirrored, and the colors are right (amber accents, not blue). Red and blue swapped means `lcd.bgr`. A mirrored image means a MADCTL bit.
+4. **Touch:** tap each corner and the center of the profile grid, and swipe up, down, left and right. A swipe down must cancel; reversed directions mean `swap_xy` or `mirror_y` is wrong, and edge misses mean the missing gain and offset. Record the real result.
+5. **Keys:** VOL+ scrolls up and VOL- scrolls down in the settings list.
+6. **Microphone:** hold the screen and speak; the waves move with your voice. Silence with `0x40` present points at the microphone channel.
+7. **Speaker:** replies are clear, with no hiss while idle (`set volume 80`).
+8. **PSRAM:** `hermes-gadget diag` reports `psram_total` near 8 MB. Zero, with a `no PSRAM found` boot error, means it did not start.
+
+Record the results with the [hardware checklist](hardware-validation.md#record-a-physical-test).
+
+Pin numbers, the panel table and the bring-up order follow the reference project's `firmware/hardware_test` and `SKILL.md`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## M5Stack CoreS3
 
 Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRAM. Core, Core2 and CoreS3 SE are not covered by this profile. The port is experimental for both LCD revisions; a [camera capture check](hardware-validation.md#m5stack-cores3-camera-capture-check) covers one ILI9342C unit, but full physical reports remain outstanding.

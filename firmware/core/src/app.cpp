@@ -1056,6 +1056,7 @@ bool App::profile_page_step(int dir) {
 }
 
 bool App::show_reply_text() {
+  if (ui_ && ui_->area().pet) return false;  // that face shows the text only on a swipe down, once it has finished
   if (model_.screen != Screen::Responding || !model_.hero || reply_.empty()) return false;
   reply_shown_ = true;
   update_model();
@@ -1628,7 +1629,13 @@ void App::on_button(Button button, bool pressed, bool touch) {
       } else if (mode_ == Mode::Listening) cancel_listening("cancelled");
       else if (overlay_ != Overlay::None) dismiss_overlay();
       else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
-      else if (dashboard_ready_ && paired_) {
+      else if (ui_ && ui_->area().pet && (reply_wanted_ || !reply_.empty())) {
+        // The face stays up after a reply: a swipe down brings the text, and another puts it away.
+        reply_wanted_ = !reply_wanted_;
+        reply_until_ = reply_wanted_ ? now() + kReplyLingerMs : now();
+        scroll_ = 0;
+        page_at_ = now() + page_dwell_ms();
+      } else if (dashboard_ready_ && paired_) {
         overlay_ = Overlay::Dashboard;
         overlay_until_ = 0;
         dash_scroll_ = 0;
@@ -1639,6 +1646,14 @@ void App::on_button(Button button, bool pressed, bool touch) {
     case Button::Up:
     case Button::Down:
       if (!pressed) break;
+      if (profile_.volume_keys && hal_.speaker && !settings_open()) {
+        const int next = std::clamp(volume_ + (button == Button::Up ? 10 : -10), 0, 100);
+        volume_ = static_cast<uint8_t>(next);
+        hal_.speaker->set_volume(volume_);
+        if (hal_.storage) hal_.storage->set("volume", std::to_string(next));
+        set_hint_flash(std::string(tr(i18n::Msg::SpeakerVolume)) + " " + std::to_string(next) + "%");
+        break;
+      }
       if (prompt_showing()) break;
       if (show_reply_text()) return;
       page_at_ = now() + kManualScrollPauseMs;
@@ -2446,6 +2461,7 @@ void App::update_model() {
   m.face = face_ ? &*face_ : nullptr;
   m.dash.clear();
   m.hero = false;
+  m.face_only = false;
   m.name_target = false;
   m.caption_lines = 1;
   m.scroll = scroll_;
@@ -2748,6 +2764,7 @@ void App::update_model() {
       }
       m.detail = caption_;
     }
+    if (ui_ && ui_->area().pet) m.hero = true;
   } else {
     m.screen = Screen::Ready;
     m.headline = tr(Msg::Ready);
@@ -2755,7 +2772,8 @@ void App::update_model() {
     const bool tap = talk_mode_ == TalkMode::Tap;
     m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(tap ? Msg::TapScreenToTalk : Msg::HoldScreenToTalk))
                                    : tr(tap ? Msg::TapButtonToTalk : Msg::HoldButtonToTalk, {talk});
-    bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
+    if (static_cast<int32_t>(reply_until_ - now()) <= 0) reply_wanted_ = false;
+    bool showing_reply = reply_text_allowed() && !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
     if (m.hero) {
       const bool switching = agent_profiles_.size() > 1;
@@ -2799,6 +2817,16 @@ void App::update_model() {
   if (m.screen == Screen::Ready && m.hero && power_status_ && power_status_->battery_percent &&
       *power_status_->battery_percent <= 10 && power_status_->external_power == false)
     m.detail = tr(Msg::LowBattery);
+  // The everyday screens are only the face. Anything that needs reading keeps its words.
+  if (m.hero && notice_.empty() && ui_ && ui_->area().pet &&
+      (m.screen == Screen::Ready || m.screen == Screen::Listening || m.screen == Screen::Thinking ||
+       m.screen == Screen::Responding)) {
+    m.face_only = true;
+    m.headline.clear();
+    m.detail.clear();
+    m.hint.clear();
+    m.name_target = false;
+  }
   if (!hint_flash_.empty()) m.hint = hint_flash_;
   if (!display_sleeping_) render(m);
 }

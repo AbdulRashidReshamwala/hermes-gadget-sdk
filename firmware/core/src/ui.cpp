@@ -238,6 +238,184 @@ int tri(uint32_t frame, int period) {
   return p < period / 2 ? p : period - p;
 }
 
+// The minimal face: white blocks for eyes and mouth and orange pixel cheeks, on a grid of
+// square cells. Everything is whole cells, so it reads as pixel art at any size.
+struct PixelFace {
+  enum class Eyes : uint8_t { Block, Happy, Line };
+  enum class Mouth : uint8_t { Smile, Flat, Open, Frown, None };
+  Eyes eyes = Eyes::Block;
+  Mouth mouth = Mouth::Smile;
+  int8_t eye_h = 5, dx = 0, dy = 0;   // eye height and glance, in cells
+  int8_t mouth_w = 2, mouth_h = 1;    // Flat and Open
+  int8_t tilt = 0;                    // cells the left eye drops and the right eye rises
+  int8_t right_h = -1;                // the right eye's height when it differs, or -1
+  int8_t lift = 0;                    // half cells the whole face rises by
+  int16_t trail = -1;                 // thinking: head of the trail around the face, or -1
+  uint8_t bars[6] = {0, 0, 0, 0, 0, 0};  // listening: equaliser heights in quarter cells, 0 for none
+  bool tongue = false;
+  bool cheeks = true;
+};
+
+PixelFace pixel_face(const UiModel& m) {
+  const uint32_t f = m.animate ? m.frame : 0;
+  PixelFace face;
+  switch (m.screen) {
+    case Screen::Listening: {
+      // A curious tilt, eyes that open with a louder voice, and a mouth that is the sound itself.
+      static constexpr int8_t kTilt[4] = {0, 1, 0, -1};
+      static constexpr int kShape[6] = {60, 85, 100, 100, 85, 60};
+      const int level = std::max<int>(std::min<int>(m.level, 100), m.animate ? 10 : 0);
+      face.eye_h = level > 45 ? 6 : 5;
+      face.tilt = level > 45 ? int8_t(0) : kTilt[(f / 12) % 4];
+      face.mouth = PixelFace::Mouth::None;
+      for (int i = 0; i < 6; ++i) {
+        const int wave = 45 + 55 * tri(f * 2 + static_cast<uint32_t>(i) * 5, 14) / 7;
+        face.bars[i] = static_cast<uint8_t>(2 + 14 * level * kShape[i] * wave / 1000000);
+      }
+      break;
+    }
+    case Screen::Thinking: {
+      // Eyes wander upward, one narrowing in turn, while a trail runs around the face.
+      static constexpr int8_t kGlance[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+      face.dx = kGlance[(f / 7) % 8];
+      face.dy = -1;
+      face.eye_h = (f / 28) % 2 ? 3 : 5;
+      face.right_h = (f / 28) % 2 ? 5 : 3;
+      face.mouth = PixelFace::Mouth::Flat;
+      face.mouth_w = 2;
+      face.trail = static_cast<int16_t>((f * 2) % 68);
+      break;
+    }
+    case Screen::Responding:
+      if (m.speaking) {
+        // Mouth shapes in the rhythm of speech: width, height (0 is a closed line), then a rest.
+        struct Shape {
+          int8_t w, h;
+        };
+        static constexpr Shape kSpeech[24] = {{3, 2}, {2, 3}, {3, 1}, {2, 2}, {4, 3}, {3, 2}, {2, 0}, {2, 0},
+                                              {2, 2}, {4, 2}, {3, 3}, {2, 1}, {3, 2}, {2, 0}, {3, 3}, {4, 2},
+                                              {2, 2}, {3, 1}, {2, 3}, {3, 2}, {2, 1}, {2, 0}, {2, 0}, {2, 0}};
+        const Shape shape = kSpeech[(f / 2) % 24];
+        face.mouth_w = shape.w;
+        face.mouth_h = std::max<int8_t>(shape.h, 1);
+        face.mouth = shape.h ? PixelFace::Mouth::Open : PixelFace::Mouth::Flat;
+        face.tongue = shape.h >= 3;
+        face.lift = shape.h >= 3 ? 1 : 0;
+        // Bright, and every so often a smile of the eyes.
+        if ((f / 2) % 48 >= 40) face.eyes = PixelFace::Eyes::Happy;
+      } else {
+        face.eyes = PixelFace::Eyes::Happy;
+      }
+      break;
+    case Screen::Boot:
+    case Screen::Connecting:
+    case Screen::Updating: {
+      static constexpr int8_t kScan[4] = {-1, 0, 1, 0};
+      face.dx = kScan[(f / 5) % 4];
+      face.mouth = PixelFace::Mouth::Flat;
+      break;
+    }
+    case Screen::Offline:
+      face.eyes = PixelFace::Eyes::Line;
+      face.mouth = PixelFace::Mouth::Flat;
+      face.cheeks = false;
+      return face;
+    case Screen::Error:
+      face.eye_h = 3;
+      face.mouth = PixelFace::Mouth::Frown;
+      face.cheeks = false;
+      break;
+    case Screen::Prompt:
+    case Screen::Pairing:
+      face.eye_h = 6;
+      face.mouth = PixelFace::Mouth::Open;
+      face.mouth_h = 2;
+      break;
+    default:
+      // At rest: a slow glance each way between blinks.
+      if (f % 120 >= 40 && f % 120 < 54) face.dx = -1;
+      else if (f % 120 >= 80 && f % 120 < 94) face.dx = 1;
+      break;
+  }
+  if (face.eyes == PixelFace::Eyes::Block && f % 45 >= 43) face.eyes = PixelFace::Eyes::Line;  // blink
+  return face;
+}
+
+uint32_t pixel_face_key(const PixelFace& face) {
+  Hash hash;
+  hash.val(face.eyes).val(face.mouth).val(face.eye_h).val(face.dx).val(face.dy).val(face.mouth_w).val(face.mouth_h)
+      .val(face.tilt).val(face.right_h).val(face.lift).val(face.trail).val(face.tongue).val(face.cheeks);
+  for (uint8_t bar : face.bars) hash.val(bar);
+  return hash.get();
+}
+
+// One cell, and the face's rows relative to its centre: -6 to +5 cells at most.
+struct FaceArea {
+  int cx, cy, cell;
+};
+
+FaceArea face_area(int width, int y0, int y1) {
+  return {width / 2, (y0 + y1) / 2 + std::clamp(std::min(width / 29, (y1 - y0) / 16), 2, 10),
+          std::clamp(std::min(width / 29, (y1 - y0) / 16), 2, 10)};
+}
+
+void draw_pixel_face(Canvas& c, const FaceArea& area, const PixelFace& face) {
+  FaceArea a = area;
+  a.cy -= face.lift * a.cell / 2;
+  static constexpr uint16_t kWhite = rgb565(255, 255, 255), kOrange = rgb565(255, 122, 26), kOrangeMid = rgb565(176, 84, 18), kOrangeDim = rgb565(96, 46, 12);
+  const auto cells = [&](int x, int y, int w, int h, uint16_t colour) {
+    c.fill_rect(a.cx + x * a.cell, a.cy + y * a.cell, w * a.cell, h * a.cell, colour);
+  };
+  for (int side = 0; side < 2; ++side) {
+    const int ex = (side ? 4 : -8) + face.dx, ey = face.dy + (side ? -face.tilt : face.tilt);  // bottom row: ey - 1
+    const int eye_h = side && face.right_h >= 0 ? face.right_h : face.eye_h;
+    switch (face.eyes) {
+      case PixelFace::Eyes::Block: cells(ex, ey - eye_h, 4, eye_h, kWhite); break;
+      case PixelFace::Eyes::Line: cells(ex, ey - 2, 4, 1, kWhite); break;
+      case PixelFace::Eyes::Happy:
+        cells(ex + 1, ey - 4, 2, 1, kWhite);
+        cells(ex, ey - 3, 1, 2, kWhite);
+        cells(ex + 3, ey - 3, 1, 2, kWhite);
+        break;
+    }
+    if (face.cheeks) cells(side ? 8 + face.dx : -9 + face.dx, ey, 1, 1, kOrange);
+  }
+  switch (face.mouth) {
+    case PixelFace::Mouth::Smile:
+      cells(-3, 1, 1, 1, kWhite);
+      cells(2, 1, 1, 1, kWhite);
+      cells(-2, 2, 4, 1, kWhite);
+      break;
+    case PixelFace::Mouth::Frown:
+      cells(-2, 1, 4, 1, kWhite);
+      cells(-3, 2, 1, 1, kWhite);
+      cells(2, 2, 1, 1, kWhite);
+      break;
+    case PixelFace::Mouth::Flat: cells(-face.mouth_w, 2, 2 * face.mouth_w, 1, kWhite); break;
+    case PixelFace::Mouth::Open:
+      cells(-face.mouth_w, 1, 2 * face.mouth_w, face.mouth_h, kWhite);
+      if (face.tongue) cells(-face.mouth_w + 1, face.mouth_h, 2 * face.mouth_w - 2, 1, kOrange);
+      break;
+    case PixelFace::Mouth::None: break;
+  }
+  static constexpr int kBarX[6] = {-6, -4, -2, 1, 3, 5};
+  for (int i = 0; i < 6; ++i) {
+    if (!face.bars[i]) continue;
+    const int height = face.bars[i] * a.cell / 4;
+    c.fill_rect(a.cx + kBarX[i] * a.cell, a.cy + 3 * a.cell - height / 2, a.cell, height, i == 2 || i == 3 ? kOrange : kWhite);
+  }
+  if (face.trail >= 0) {
+    // Around a 22 by 14 cell rectangle: 68 steps, a new dot every other step, fading behind the head.
+    static constexpr uint16_t kFade[6] = {kOrange, kOrange, kOrangeMid, kOrangeMid, kOrangeDim, kOrangeDim};
+    for (int i = 0; i < 6; ++i) {
+      const int p = (face.trail + 68 - i * 2) % 68;
+      const int x = p < 21 ? -11 + p : p < 34 ? 10 : p < 55 ? 10 - (p - 34) : -11;
+      const int y = p < 21 ? -8 : p < 34 ? -8 + (p - 21) : p < 55 ? 5 : 5 - (p - 55);
+      cells(x, y, 1, 1, kFade[i]);
+    }
+  }
+}
+
 mascot::Frame mascot_frame(const UiModel& m) {
   // With animation off the Updating mascot never blinks, so the screen stands still.
   if (m.screen == Screen::Updating && !m.animate) return mascot::Frame::Idle;
@@ -263,15 +441,17 @@ uint32_t hero_anim_key(const UiModel& m) {
   Hash h;
   h.val(mascot_frame(m));
   switch (m.screen) {
-    case Screen::Listening: h.val(m.frame % 3).val(m.level / 20); break;
+    case Screen::Listening: h.val(m.animate ? m.frame : m.frame % 3).val(m.level / 20); break;
     case Screen::Thinking:
+      h.val(m.animate ? m.frame : (m.frame / 2) % 4);
+      break;
     case Screen::Connecting:
       h.val((m.frame / 2) % 4);
       break;
     case Screen::Updating:
       if (m.animate) h.val((m.frame / 2) % 4);
       break;
-    case Screen::Responding: h.val((m.frame / 2) % 3); break;
+    case Screen::Responding: h.val(m.animate && m.speaking ? m.frame : (m.frame / 2) % 3); break;
     default: break;
   }
   return h.get();
@@ -336,7 +516,7 @@ const char* screen_name(Screen s) {
 }
 
 Ui::Ui(Display& display)
-    : display_(display), panel_(display.info()), info_(panel_), bg_(panel_.emissive ? 0 : kBg) {
+    : display_(display), panel_(display.info()), info_(panel_), bg_(panel_.emissive || panel_.pet ? 0 : kBg) {
   if (panel_.round) {
     // The largest square inside the circle; the corners of the panel do not exist.
     const int side = std::min(panel_.width, panel_.height) * 707 / 1000;
@@ -354,13 +534,15 @@ Ui::Ui(Display& display)
   // A round panel's top band holds the link dot and one line of the settings
   // label: 2r + 14s, and never under 36 px so the hold target stays finger-sized.
   const int dot_r = std::max(2, 3 * s / 2 + 1);
-  layout_.top_h = panel_.round ? std::max(36, 2 * dot_r + 14 * s) : bar_h;
-  layout_.bottom_h = bar_h;
+  // Rounded corners: both bars grow inward so their text sits below the curve.
+  const int corner_v = panel_.corner_inset / 4;
+  layout_.top_h = panel_.round ? std::max(36, 2 * dot_r + 14 * s) : bar_h + corner_v;
+  layout_.bottom_h = bar_h + corner_v;
   layout_.title_w = panel_.round ? std::min(w, 120 * s) : w;
   layout_.header_h = Canvas::line_height(s + 1) + 4 * s;
   layout_.main_y = layout_.top_h;
   layout_.main_h = h - layout_.top_h - layout_.bottom_h;
-  int margin = 4 * s;
+  int margin = 4 * s + panel_.corner_inset / 3;
   int content_h = h - layout_.top_h - layout_.header_h - layout_.bottom_h;
   layout_.body_cols = cols_for(w - 2 * margin, s);
   layout_.body_rows = std::max(1, (content_h - margin) / Canvas::line_height(s));
@@ -588,7 +770,7 @@ void Ui::draw_frame(const UiModel& m) {
   hashes[0] = Hash().add(m.title).val(m.lang).val(m.link).val(panel_.round && m.screen == Screen::Settings).val(panel_.round && m.settings_hold)
                   .val(panel_.round ? int8_t(-1) : m.battery).val(!panel_.round && m.battery_charging)
                   .val(!panel_.round && m.battery_icon).val(!panel_.round && m.battery_text)
-                  .val(!panel_.round && m.battery_low).val(top_fill).get();
+                  .val(!panel_.round && m.battery_low).val(top_fill).val(panel_.pet && m.hero).val(m.face_only).get();
   hashes[1] = Hash()
                   .val(m.screen)
                   .add(m.headline)
@@ -608,7 +790,7 @@ void Ui::draw_frame(const UiModel& m) {
     content.val(m.grid).val(m.face_row).val(m.mascot_row).val(m.settings_row).add(m.face ? m.face->hash : std::string())
         .val(m.thumbs_rev).val(m.thumbs.size());
   hashes[2] = content.get();
-  hashes[3] = Hash().add(m.hint).get();
+  hashes[3] = Hash().add(m.hint).val(panel_.pet && m.hero).get();
 
   if (m.hero) {
     // Hero mode: top bar, one mascot band, bottom bar.
@@ -620,7 +802,7 @@ void Ui::draw_frame(const UiModel& m) {
     }
     uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines)
                         .val(m.name_target).add(m.face ? m.face->hash : std::string()).get();
-    uint32_t anim = hero_anim_key(m);
+    uint32_t anim = panel_.pet ? pixel_face_key(pixel_face(m)) : hero_anim_key(m);
     int y0 = y_header, y1 = y_bottom;
     bool redraw = !valid_ || !hero_valid_ || stat != hero_static_;
     if (!redraw && anim != hero_anim_) {
@@ -673,7 +855,8 @@ void Ui::draw_frame(const UiModel& m) {
 void Ui::draw_top(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int w = info_.width;
-  c.fill_rect(0, 0, w, layout_.top_h, panel_.round ? bg_ : kBar);
+  c.fill_rect(0, 0, w, layout_.top_h, panel_.round || (panel_.pet && m.hero) ? bg_ : kBar);
+  if (m.face_only) return;
   uint16_t dot = kRed;
   i18n::Msg word = i18n::Msg::LinkOffline;
   switch (m.link) {
@@ -683,7 +866,7 @@ void Ui::draw_top(Canvas& c, const UiModel& m) {
     case Link::Online: dot = kGreen; word = i18n::Msg::LinkOnline; break;
   }
   const char* label = i18n::text(m.lang, word);
-  int ty = s;
+  int ty = s + panel_.corner_inset / 4;
   if (panel_.round) {
     // The settings hold target: a dim label under the link dot, with no bar
     // behind it. The label line (2r + 4s .. 2r + 13s) fits the band.
@@ -708,11 +891,12 @@ void Ui::draw_top(Canvas& c, const UiModel& m) {
   c.text(label_x, ty, label, s, kDim);
   int r = std::max(2, 3 * s / 2 + 1);
   const int dot_x = label_x - 3 * s - r;
-  c.fill_circle(dot_x, layout_.top_h / 2, r, dot);
+  const int bar_mid = panel_.corner_inset ? ty + 7 * s / 2 : layout_.top_h / 2;
+  c.fill_circle(dot_x, bar_mid, r, dot);
   int title_end = dot_x - r;
   if (m.battery >= 0) {
     title_end -= 4 * s + battery_width(m);
-    draw_battery(c, m, title_end, layout_.top_h / 2);
+    draw_battery(c, m, title_end, bar_mid);
   }
   int title_cols = cols_for(title_end - 3 * s - pad, s);
   c.text(pad, ty, fit(m.title, title_cols), s, kText);
@@ -893,9 +1077,15 @@ void Ui::draw_header(Canvas& c, const UiModel& m) {
   const int hh = layout_.header_h;
   c.fill_rect(0, y0, info_.width, hh, bg_);
   int r = hh / 2 - 2 * s;
-  int cx = 4 * s + r;
+  int cx = 4 * s + panel_.corner_inset / 3 + r;
   int cy = y0 + hh / 2;
-  draw_indicator(c, m, cx, cy, r);
+  if (m.face && m.face->rgb565) {
+    // The character keeps you company above the text.
+    const int d = 2 * r + 4;
+    c.picture(cx - d / 2, cy - d / 2, d, m.face->rgb565, m.face->px, nullptr, 0, 0);
+  } else {
+    draw_indicator(c, m, cx, cy, r);
+  }
   int tx = cx + r + 4 * s;
   int hs = s + 1;
   int cols = cols_for(info_.width - tx - 2 * s, hs);
@@ -916,7 +1106,7 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   const int w = info_.width;
   const int y0 = layout_.top_h + layout_.header_h;
   const int y1 = info_.height - layout_.bottom_h;
-  const int margin = 4 * s;
+  const int margin = 4 * s + panel_.corner_inset / 3;
   const int lh = Canvas::line_height(s);
   c.fill_rect(0, y0, w, y1 - y0, bg_);
   int y = y0 + margin;
@@ -981,8 +1171,8 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
     int track_y = y, track_h = rows * lh;
     int thumb_h = std::max(2 * s, track_h * rows / total);
     int thumb_y = track_y + (track_h - thumb_h) * first / std::max(1, max_first);
-    c.fill_rect(w - 2 * s, track_y, s, track_h, kFaint);
-    c.fill_rect(w - 2 * s, thumb_y, s, thumb_h, kDim);
+    c.fill_rect(w - 2 * s - panel_.corner_inset / 3, track_y, s, track_h, kFaint);
+    c.fill_rect(w - 2 * s - panel_.corner_inset / 3, thumb_y, s, thumb_h, kDim);
   }
 }
 
@@ -1029,8 +1219,8 @@ void Ui::draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1) {
     const int track_y = y0 + margin, track_h = std::min(rows * row_h, y1 - track_y);
     const int thumb_h = std::max(2 * s, track_h * rows / total);
     const int thumb_y = track_y + (track_h - thumb_h) * first / std::max(1, max_first);
-    c.fill_rect(w - 2 * s, track_y, s, track_h, kFaint);
-    c.fill_rect(w - 2 * s, thumb_y, s, thumb_h, kDim);
+    c.fill_rect(w - 2 * s - panel_.corner_inset / 3, track_y, s, track_h, kFaint);
+    c.fill_rect(w - 2 * s - panel_.corner_inset / 3, thumb_y, s, thumb_h, kDim);
   }
 }
 
@@ -1442,8 +1632,8 @@ void Ui::draw_settings(Canvas& c, const UiModel& m, int y0, int y1) {
     const int view = y1 - y0, total = view + max_scroll;
     const int thumb_h = std::max(4 * s, view * view / total);
     const int thumb_y = y0 + (view - thumb_h) * scroll / max_scroll;
-    c.fill_rect(w - 2 * s, y0, s, view, kFaint);
-    c.fill_rect(w - 2 * s, thumb_y, s, thumb_h, kDim);
+    c.fill_rect(w - 2 * s - panel_.corner_inset / 3, y0, s, view, kFaint);
+    c.fill_rect(w - 2 * s - panel_.corner_inset / 3, thumb_y, s, thumb_h, kDim);
   }
   c.set_clip_rows(clip0, clip1);
 }
@@ -1520,7 +1710,7 @@ Ui::HeroGeom Ui::hero_geom(const UiModel& m) const {
   const int reserved = m.screen == Screen::Responding ? max_lines : 1;
   const int ch = caption_h(std::max<int>(reserved, static_cast<int>(g.detail.size()))) + std::max(0, g.name_h - (2 * lh + s));
   const int avail = std::min(w - 8 * s, layout_.main_h - ch - buttons_h - 4 * s);
-  g.size = mascot::pick(avail, mascot::Frame::Idle)->size;
+  g.size = panel_.pet ? std::max(avail, static_cast<int>(smallest)) : mascot::pick(avail, mascot::Frame::Idle)->size;
   const int block = g.size + 2 * s + ch + buttons_h;
   g.x = (w - g.size) / 2;
   g.y = layout_.main_y + std::max(s, (layout_.main_h - block) / 2);
@@ -1538,6 +1728,13 @@ bool Ui::talk_caption_fits() const {
 
 void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
   const HeroGeom g = hero_geom(m);
+  if (panel_.pet) {
+    const int top = layout_.top_h, bottom = info_.height - layout_.bottom_h;
+    const FaceArea a = m.face_only ? face_area(info_.width, top, bottom) : face_area(info_.width, g.y, g.y + g.size);
+    y0 = std::max(a.cy - 8 * a.cell, top);
+    y1 = std::min(a.cy + 6 * a.cell, bottom);
+    return;
+  }
   const int size = g.size, my = g.y;
   const mascot::Anchors& a = mascot::anchors(m.face);
   // A colour face's band, as the rows Canvas::picture draws it on at `size`.
@@ -1559,6 +1756,7 @@ void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
     case Screen::Listening: {
       int ey = my + size * a.ear_cup.y / 1000;
       add(ey - reach, ey + reach);
+      add(my - size / 6, my + size + size / 6);  // the bobbing face
       break;
     }
     case Screen::Responding: {
@@ -1567,6 +1765,7 @@ void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
       band_rows(mascot::Frame::Talk, lo, hi);
       add(lo, hi);
       add(mouth - reach, mouth + reach);
+      add(my - size / 6, my + size + size / 6);  // the bouncing face
       break;
     }
     case Screen::Thinking:
@@ -1574,6 +1773,7 @@ void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
     case Screen::Updating: {
       int ty = my + size * a.head_top_right.y / 1000;
       add(ty - size / 6, ty + size / 12);
+      if (m.screen == Screen::Thinking) add(my - size / 6, my + size + size / 6);  // the orbit
       break;
     }
     default: break;
@@ -1588,13 +1788,26 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
   const int y0 = layout_.top_h;
   const int y1 = info_.height - layout_.bottom_h;
   const int lh = Canvas::line_height(s);
-  c.fill_rect(0, y0, w, y1 - y0, bg_);
-
   const HeroGeom g = hero_geom(m);
-  const int size = g.size, mx = g.x, my = g.y;
+  c.fill_rect(0, y0, w, y1 - y0, bg_);
+  // The avatar moves: a slow bob while listening or thinking, a quick bounce while speaking.
+  const bool listening = m.animate && m.screen == Screen::Listening;
+  const bool talking = m.animate && m.screen == Screen::Responding && m.speaking;
+  const bool bobbing = listening || (m.animate && m.screen == Screen::Thinking);
+  const int size = g.size, mx = g.x;
+  const int my = g.y + (talking ? tri(m.frame, 6) * 2 - 3 : bobbing ? tri(m.frame, 16) / 2 - 2 : 0);
   const mascot::Anchors& a = mascot::anchors(m.face);
-  const mascot::Bitmap b = mascot::pick(size, mascot_frame(m), m.face);
-  draw_face(c, mx, my, b, m.face, kText);
+  if (panel_.pet)
+    draw_pixel_face(c, m.face_only ? face_area(w, y0, y1) : face_area(w, g.y, g.y + g.size), pixel_face(m));
+  mascot::Bitmap b = mascot::pick(size, mascot_frame(m), m.face);
+  // A colour avatar also grows with your voice and pulses with its speech.
+  int grow = 0;
+  if (m.face && m.face->rgb565) {
+    if (listening) grow = size * std::min<int>(m.level, 100) / 800;
+    else if (talking) grow = size * tri(m.frame, 6) / 40;
+  }
+  b.size = static_cast<uint16_t>(b.size + grow);
+  if (!panel_.pet) draw_face(c, mx - grow / 2, my - grow / 2, b, m.face, kText);
   const int stroke = std::max(2, size / 48);
   auto waves = [&](int cx, int cy, int dir, int lit, int phase, uint16_t on, uint16_t dim, int r0) {
     for (int i = 0; i < 3; ++i) {
@@ -1613,11 +1826,15 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
       c.fill_circle(tx + i * gap, ty - i * gap / 2, r, i == active ? on : dim);
     }
   };
-  switch (m.screen) {
+  // The pet does its own listening, thinking and talking.
+  switch (panel_.pet ? Screen::Ready : m.screen) {
     case Screen::Listening: {
-      int lit = 1 + std::min(2, m.level / 34);
-      waves(mx + size * a.ear_cup.x / 1000, my + size * a.ear_cup.y / 1000, +1, lit,
-            static_cast<int>(m.frame % 3), kGreen, kGreenDim, 90);
+      const int lit = 1 + std::min(2, m.level / 34);
+      const int ripple = 90 + std::min<int>(m.level, 100) / 3;  // louder pushes the waves outward
+      const int ey = my + size * a.ear_cup.y / 1000;
+      const int phase = static_cast<int>(m.frame % 3);
+      waves(mx + size * a.ear_cup.x / 1000, ey, +1, lit, phase, kGreen, kGreenDim, ripple);
+      waves(mx + size * (1000 - a.ear_cup.x) / 1000, ey, -1, lit, phase, kGreen, kGreenDim, ripple);
       break;
     }
     case Screen::Responding:
@@ -1627,7 +1844,22 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
               static_cast<int>((m.frame / 2) % 3), kAccent, kAccentDim, 130);
       }
       break;
-    case Screen::Thinking: dots(kBlue, kBlueDim); break;
+    case Screen::Thinking: {
+      if (!m.animate) {
+        dots(kBlue, kBlueDim, false);
+        break;
+      }
+      // Sparkles orbiting the head, the brightest in front and a fading tail behind it.
+      const int cx = mx + size / 2, cy = my + size / 2, orbit = size * 56 / 100;
+      for (int i = 0; i < 7; ++i) {
+        const double t = (m.frame * 22.0 - i * 24.0) * 3.14159265 / 180.0;
+        const int dot = std::max(2, size / 26 - i * size / 220);
+        const int x = cx + static_cast<int>(std::lround(std::cos(t) * orbit));
+        const int y = cy + static_cast<int>(std::lround(std::sin(t) * orbit * 88 / 100));
+        c.fill_circle(x, y, dot, i == 0 ? kYellow : i < 3 ? kBlue : kBlueDim);
+      }
+      break;
+    }
     case Screen::Connecting: dots(kAccent, kAccentDim); break;
     case Screen::Updating: dots(kAccent, kAccentDim, m.animate); break;
     default: break;
@@ -1649,7 +1881,7 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
 
   // Answer buttons (Prompt screen): TALK on the left, CANCEL on the right.
   if (!m.yes.empty() || !m.no.empty()) {
-    const int bh = lh + 4 * s, gap = 4 * s, margin = 4 * s;
+    const int bh = lh + 4 * s, gap = 4 * s, margin = 4 * s + panel_.corner_inset / 3;
     const int bw = (w - 2 * margin - gap) / 2;
     auto button = [&](int x, const std::string& label, uint16_t fill) {
       c.fill_round_rect(x, g.buttons_y, bw, bh, 3 * s, fill);
@@ -1664,8 +1896,8 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
 void Ui::draw_bottom(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int y0 = info_.height - layout_.bottom_h;
-  c.fill_rect(0, y0, info_.width, layout_.bottom_h, panel_.round ? bg_ : kBar);
-  std::string hint = fit(m.hint, cols_for(info_.width - 4 * s, s));
+  c.fill_rect(0, y0, info_.width, layout_.bottom_h, panel_.round || (panel_.pet && m.hero) ? bg_ : kBar);
+  std::string hint = fit(m.hint, cols_for(info_.width - 4 * s - 2 * panel_.corner_inset, s));
   c.text((info_.width - Canvas::text_width(hint, s)) / 2, y0 + s, hint, s, kDim);
 }
 

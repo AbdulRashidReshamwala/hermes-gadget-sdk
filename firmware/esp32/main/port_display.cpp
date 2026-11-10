@@ -21,6 +21,11 @@
 #include "panel_vocat.hpp"
 #include "panel_ws185.hpp"
 #include "freertos/task.h"
+#if CONFIG_HG_BOARD_CHEEKO_GOTCHI
+// Built, and linked, only for the board that has this panel (components/esp_lcd_jd9853).
+#include "esp_lcd_jd9853.h"
+#include "panel_jd9853.hpp"
+#endif
 
 namespace hgp {
 namespace {
@@ -67,6 +72,12 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   const bool qspi = cfg.controller == LcdController::St77916 || cfg.controller == LcdController::Sh8601 ||
                      cfg.controller == LcdController::Spd2010;
   const bool st77916 = cfg.controller == LcdController::St77916;
+#if !CONFIG_HG_BOARD_CHEEKO_GOTCHI
+  if (cfg.controller == LcdController::Jd9853) {
+    ESP_LOGE(TAG, "the JD9853 driver is built only for the Cheeko Gotchi profile");
+    return false;
+  }
+#endif
   const bool gc9a01 = cfg.controller == LcdController::Gc9a01;
   // The SPD2010 accepts a window only when both x edges are multiples of 4.
   // This port always draws from x = 0 across the full width, plus gap_x.
@@ -86,7 +97,8 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
       ili9341 = true;
     }
   }
-  controller_name_ = cfg.controller == LcdController::Sh8601 ? "sh8601"
+  controller_name_ = cfg.controller == LcdController::Jd9853 ? "jd9853"
+                     : cfg.controller == LcdController::Sh8601 ? "sh8601"
                      : cfg.controller == LcdController::Spd2010 ? "spd2010"
                      : qspi ? "st77916" : gc9a01 ? "gc9a01"
                      : cfg.controller == LcdController::Ili9341 ? "ili9341"
@@ -253,6 +265,15 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
       panel_cfg.vendor_config = &st_vendor;
       if (!esp_ok(esp_lcd_new_panel_st77916(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_st77916")) return false;
     }
+#if CONFIG_HG_BOARD_CHEEKO_GOTCHI
+  } else if (cfg.controller == LcdController::Jd9853) {
+    // The component keeps no default table; the module's sequence is panel_jd9853.hpp.
+    jd9853_vendor_config_t jd_vendor = {};
+    jd_vendor.init_cmds = kJd9853PanelInit;
+    jd_vendor.init_cmds_size = sizeof(kJd9853PanelInit) / sizeof(kJd9853PanelInit[0]);
+    panel_cfg.vendor_config = &jd_vendor;
+    if (!esp_ok(esp_lcd_new_panel_jd9853(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_jd9853")) return false;
+#endif
   } else if (ili9341) {
     if (cfg.controller == LcdController::Box3) {
       vendor.init_cmds = kBox3PanelInit;
@@ -328,6 +349,8 @@ hg::DisplayInfo SpiDisplay::info() const {
   di.has_backlight = cfg_.backlight >= 0 || static_cast<bool>(board_backlight);
   di.round = cfg_.round;
   di.font_scale = cfg_.font_scale;
+  di.corner_inset = cfg_.corner_inset;
+  di.pet = cfg_.pet;
   return di;
 }
 

@@ -21,6 +21,7 @@ Have these ready:
 | [Espressif ESP32-S3-Korvo-2](hardware.md#esp32-s3-korvo-2) | Hold the screen to talk, swipe down to cancel; onboard microphones and speaker; needs the LCD sub-board; experimental |
 | [LCDWIKI ES3C28P](hardware.md#lcdwiki-es3c28p) | Hold the screen or BOOT to talk, swipe down to cancel; onboard microphone and a speaker output; experimental; until a release includes it, [build it from source](hardware.md#lcdwiki-es3c28p) |
 | [Espressif ESP32-S3-BOX-3](hardware.md#esp32-s3-box-3) | Hold the screen or BOOT to talk, swipe down to cancel; onboard microphones and speaker; experimental |
+| [Cheeko Gotchi v1.2](hardware.md#cheeko-gotchi-v12) | Hold the screen to talk, swipe down to cancel; volume keys scroll; onboard microphones and speaker; experimental, not yet run on a board |
 | [M5Stack CoreS3](hardware.md#m5stack-cores3) | Hold the screen to talk, swipe down to cancel; onboard audio and battery management; experimental |
 | [ESP32-S3 breadboard build](hardware.md) | Wire the display, microphone, buttons, and optional speaker first |
 
@@ -55,6 +56,12 @@ hermes gadget update "Kitchen" --latest
 ```
 
 `--latest` installs the newest release only on a device that runs an older version. A device on that version or a newer one, including a source build such as `0.4.0-12-gabc1234`, is left alone, and a device whose version can't be read is refused; `hermes gadget update "Kitchen" --latest --force` installs the release anyway. The plugin and the device both refuse an image built for another board, so a wrong `--board` or file cannot be installed. For a custom build, follow [Build and flash](hardware.md#build-and-flash). For USB configuration from the SDK checkout, install the serial extra with `python -m pip install -e ".[serial]"` and use `hermes-gadget provision --help`.
+
+To send your own build from another computer, use `tools/gadget-ota.sh`. It copies the app image to the Hermes machine and runs the update there; `--container` is for Hermes in Docker and `--sudo` for a machine where Docker needs root:
+
+```bash
+tools/gadget-ota.sh --host me@hermes-box --container hermes --sudo "Kitchen" hermes_gadget.bin
+```
 
 ## Set up Wi-Fi with your phone
 

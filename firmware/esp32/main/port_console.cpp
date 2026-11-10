@@ -10,6 +10,9 @@
 #include "esp_log.h"
 #include "hg/console_args.hpp"
 #include "sdkconfig.h"
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#endif
 
 namespace hgp::console {
 namespace {
@@ -40,9 +43,7 @@ int run(int argc, char** argv) {
   return 0;
 }
 
-}  // namespace
-
-void begin() {
+void start() {
   static const char* const kCommands[] = {"help",      "status", "diag",   "get",         "set",       "say",       "camera",
                                           "talk",      "release", "cancel", "new-session", "reconnect", "forget-key",
                                           "factory-reset", "settings", "wifi-setup", "wifi", "phone", "perf"};
@@ -69,6 +70,24 @@ void begin() {
 #endif
   ESP_ERROR_CHECK(esp_console_start_repl(repl));
   ESP_LOGI(TAG, "console ready (type: help)");
+}
+
+}  // namespace
+
+void begin() {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+  // Setting up this console stalls until a USB host is attached, and on battery there is
+  // none. Wait for one on a task of its own so the app loop, and Wi-Fi with it, still run.
+  auto wait_for_host = [](void*) {
+    while (!usb_serial_jtag_is_connected()) vTaskDelay(pdMS_TO_TICKS(250));
+    start();
+    vTaskDelete(nullptr);
+  };
+  if (xTaskCreate(wait_for_host, "hg-console-up", 6144, nullptr, 1, nullptr) != pdPASS)
+    ESP_LOGE(TAG, "console task not started");
+#else
+  start();
+#endif
 }
 
 }  // namespace hgp::console

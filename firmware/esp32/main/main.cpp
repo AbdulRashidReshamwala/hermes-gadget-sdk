@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "driver/gpio.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -256,6 +257,24 @@ void power_rails_on(const hgp::BoardConfig& b) {
 
 // Light sleep disables every GPIO it doesn't know about; these must keep their
 // level so the panel, touch controller, amplifier and buses survive a doze.
+#if CONFIG_HG_BOARD_CHEEKO_GOTCHI
+// No battery reading or charge signal on this board, so the only thing known about the supply
+// is whether a USB host is attached. A charger without data counts as battery, which only saves
+// power. The doze and Wi-Fi power save need this to tell that the device is unplugged.
+class UsbSupply : public hg::Power {
+ public:
+  std::optional<hg::PowerStatus> read() override {
+    hg::PowerStatus status;
+    status.external_power = external_power();
+    return status;
+  }
+  bool can_power_off() const override { return false; }
+  bool power_off() override { return false; }
+  std::optional<bool> external_power() override { return usb_serial_jtag_is_connected(); }
+};
+UsbSupply g_usb_supply;
+#endif
+
 void keep_pins_through_sleep(const hgp::BoardConfig& b) {
   // A latch-powered board must also keep its battery latch high, or light sleep cuts the supply.
   const int pins[] = {b.amoled.cs, b.amoled.sclk, b.amoled.d0, b.amoled.d1, b.amoled.d2, b.amoled.d3,
@@ -418,6 +437,10 @@ extern "C" void app_main(void) {
   if (latch_power) hal.power = &g_latch_power;
   if (latch_power && board.latch_power.usb_external_power)
     g_wifi.on_battery = [] { return g_latch_power.external_power() == std::optional<bool>(false); };
+#endif
+#if CONFIG_HG_BOARD_CHEEKO_GOTCHI
+  hal.power = &g_usb_supply;
+  g_wifi.on_battery = [] { return g_usb_supply.external_power() == std::optional<bool>(false); };
 #endif
   if (g_updater.capacity()) hal.updater = &g_updater;
 #if CONFIG_HG_BOARD_ESP32_CYD
@@ -599,6 +622,9 @@ extern "C" void app_main(void) {
   profile.wake_key = board.buttons.talk >= 0 || board.axp_power_key || board.pwr_key.enabled;
   profile.talk_key = board.buttons.talk >= 0;
   profile.talk_label = board.talk_label;
+#if CONFIG_HG_BOARD_CHEEKO_GOTCHI
+  profile.volume_keys = true;
+#endif
   profile.cancel_label = board.cancel_label;
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
   profile.has_cancel_button = keyboard;
