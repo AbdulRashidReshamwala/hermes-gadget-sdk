@@ -47,6 +47,7 @@ struct DeviceProfile {
   uint32_t speaker_rate = 16000;
   bool has_cancel_button = true;
   bool has_scroll_buttons = false;
+  bool volume_keys = false;  // Up and Down change the speaker volume instead of scrolling
   std::string talk_label = "TALK";
   std::string cancel_label = "CANCEL";
   // The screen stands in for the buttons (hold to talk, tap to answer yes,
@@ -767,6 +768,8 @@ class App {
   bool reply_final_ = false;
   uint32_t last_turn_rx_ = 0;
   std::string reply_;
+  bool reply_wanted_ = false;  // the pixel face's reply text, asked for with a swipe down
+  bool reply_text_allowed() const { return !(ui_ && ui_->area().pet) || reply_wanted_; }
   bool reply_shown_ = false;  // the whole text, not the caption, until the Responding screen ends
   // The talking face's caption, and the text and width it was wrapped from: rewrapped only when they change.
   std::string caption_, caption_text_;

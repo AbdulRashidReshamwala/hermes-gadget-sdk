@@ -77,7 +77,9 @@ struct DsiPanelConfig {
   int vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
 };
 
-enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601, Ili9341, Spd2010 };
+// Jd9853 is the Cheeko Gotchi's 240x296 SPI panel, driven by components/esp_lcd_jd9853
+// with the start-up table in panel_jd9853.hpp.
+enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601, Ili9341, Spd2010, Jd9853 };
 
 // Which vendor initialization table an ST77916 panel gets. Waveshare's 1.85C
 // tables are chosen by the panel ID the driver reads; the ESP-VoCat's glass
@@ -111,6 +113,9 @@ struct LcdConfig {
   // SPI data-in (the CYD wires its panel's SDO to GPIO 12); -1 when unused.
   // Last, so positional initializers written before it existed keep their meaning.
   int miso = -1;
+  // Extra side padding for the top and bottom bars on a panel with rounded corners.
+  uint8_t corner_inset = 0;
+  bool pet = false;  // the animated pet on hero screens (hg::DisplayInfo)
 };
 
 struct I2sMicConfig {
@@ -191,7 +196,10 @@ struct CodecAudioConfig {
 };
 
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
-enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911, Spd2010 };
+// Cst810 reads the same report as Cst816 (register 0x02) but sends the chip no command
+// first, tolerates a raw range wider than the panel, and honours swap_xy for glass that is
+// rotated against the display. The Cheeko Gotchi selects it.
+enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911, Spd2010, Cst810 };
 
 struct TouchConfig {
   bool enabled = false;
@@ -203,7 +211,8 @@ struct TouchConfig {
   bool int_wakes = false;
   uint16_t width = 0, height = 0;
   bool mirror_x = false, mirror_y = false;
-  bool swap_xy = false;  // CST9217 report: exchange x and y after mirroring (esp_lcd_touch order)
+  bool swap_xy = false;  // CST9217 report: exchange x and y after mirroring (esp_lcd_touch order).
+                         // CST810: exchange the raw x and y first, then mirror in the width x height frame.
   int16_t offset_y = 0;  // subtracted from y when the UI starts below the panel's first row
   // Pixels per inch of the glass, so touch targets come out about 7 mm tall (hg::DeviceProfile::touch_ppi).
   // Estimates from the panel's nominal diagonal (diameter if round) and resolution, not measurements.

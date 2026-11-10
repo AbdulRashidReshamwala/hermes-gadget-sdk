@@ -31,9 +31,11 @@ struct DisplayInfo {
   // Multiplier on the UI's automatic font scale, for panels small enough that
   // the automatic pick reads as too small. The UI clamps the final scale.
   uint8_t font_scale = 1;
-  // Extra left and right padding for the top bar's text, for a rectangular
+  // Extra left and right padding for the top and bottom bars' text, for a rectangular
   // panel with rounded corners.
   uint8_t corner_inset = 0;
+  // Hero screens show the minimal pixel face instead of the mascot or avatar.
+  bool pet = false;
   // An OLED/AMOLED panel: unlit pixels draw no power, so the background is
   // true black instead of the near-black used on backlit LCDs.
   bool emissive = false;

@@ -457,7 +457,7 @@ bool App::clock_blocked() const {
   if (power_status_ && power_status_->battery_percent && *power_status_->battery_percent <= 10 &&
       power_status_->external_power == false)
     return true;
-  if (!reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0) return true;  // the reply text lingers
+  if (reply_text_allowed() && !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0) return true;  // the reply text lingers
   if (!hint_flash_.empty()) return true;
   if (display_sleeping_) return true;  // face-down sleep holds this flag until the turn-over
   return false;

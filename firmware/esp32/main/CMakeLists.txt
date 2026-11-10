@@ -94,6 +94,8 @@ idf_component_register(
         esp_adc
         esp_event
         esp_lcd
+        # Empty unless CONFIG_HG_BOARD_CHEEKO_GOTCHI (components/esp_lcd_jd9853).
+        esp_lcd_jd9853
         ${HG_RGB_REQUIRES}
         ${HG_P4_REQUIRES}
         ${HG_CORES3_CAMERA_REQUIRES}

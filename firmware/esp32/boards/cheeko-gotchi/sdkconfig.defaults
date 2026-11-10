@@ -1,0 +1,37 @@
+# Cheeko Gotchi v1.2 (experimental): ESP32-S3, 16 MB flash (esptool: "Detected flash size: 16MB"),
+# 8 MB embedded octal PSRAM, native USB-Serial/JTAG console.
+# PSRAM is untested: the reference firmware that has run on this board left it off. The mode
+# follows the module (esptool: "Embedded PSRAM 8MB"; the reference's SKILL.md says opi).
+# With PSRAM in octal mode GPIO 35-37 belong to it; this profile does not use them.
+# IGNORE_NOTFOUND lets it boot, with an error in the log, if the PSRAM does not start.
+CONFIG_IDF_TARGET="esp32s3"
+# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_HG_BOARD_CHEEKO_GOTCHI=y
+# Battery life: 80 MHz when idle, and light sleep while dozing (on battery, screen off, idle).
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+# Never while a USB host is connected: the serial console stops working under light sleep.
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# Wi-Fi wakes for each beacon on the slow clock's timing; this oscillator drifts less.
+# CONFIG_RTC_CLK_SRC_INT_RC is not set
+CONFIG_RTC_CLK_SRC_INT_8MD256=y
+# Counts light sleep for the log line that ends each doze.
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
+
+# TCP windows for links with a long round trip (a phone hotspot): 5,760 B capped
+# a connection near 33 KB/s at 175 ms, below 24 kHz audio's 48 KB/s.
+# Wi-Fi and lwIP buffers in PSRAM first, internal RAM when the module has none.
+# docs/porting.md#network-buffers
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

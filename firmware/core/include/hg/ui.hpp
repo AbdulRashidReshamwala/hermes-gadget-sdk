@@ -104,6 +104,7 @@ struct UiModel {
   // Show the mascot as large as fits, with headline/detail as a caption,
   // instead of the header + text layout.
   bool hero = false;
+  bool face_only = false;  // hero: no status bar or caption, only the face (DisplayInfo::pet)
   uint8_t caption_lines = 1;  // hero: lines the detail may wrap to (then "..")
   bool name_target = false;   // hero: the caption sits in a panel that a tap opens the profile list from
   const mascot::Face* face = nullptr;  // drawn instead of the mascot; borrowed like `qr`

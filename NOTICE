@@ -354,3 +354,24 @@ bf64d3178ab43928fa02365fbe3937cec99716ad, M5Unified commit
 96576a14247ddc935149145aa6b51943464120f1, and M5GFX commit
 28d47949bdc84f30881623476f555398e2194313. The driver and local text editor are
 independent implementations; no M5Stack or Adafruit source is copied.
+
+The Cheeko Gotchi v1.2 pin map, touch report format and orientation in
+firmware/esp32/main/board.cpp and port_touch.cpp, and the JD9853 start-up table
+in firmware/esp32/main/panel_jd9853.hpp, follow ALTIO AI Private Limited's
+cheeko-gotchi repository, https://github.com/ALTIO-AI-PRIVATE-LIMITED/cheeko-gotchi,
+commit 813fb6d221cd09e2f492e7cb169bf183685ddeea, Copyright (c) 2026 ALTIO AI
+Private Limited, MIT License (LICENSES/Cheeko-Gotchi-MIT.txt). The files used are
+SKILL.md, firmware/hardware_test/main/cheeko_self_test.c and
+firmware/animated_face_runner/main/board.c. The table's values, order and delays
+are unchanged and its payloads are re-expressed as C++ byte strings; that
+repository does not say which panel vendor published the sequence. The JD9853
+driver in firmware/esp32/components/esp_lcd_jd9853/ is adapted from that
+repository's firmware/hardware_test/components/esp_lcd_jd9853 at the same commit,
+an Espressif esp_lcd panel-driver template, Copyright 2022-2023 Espressif
+Systems (Shanghai) CO LTD, Apache License 2.0; the Espressif release it was
+copied from is not recorded there. Modified for Hermes Gadget: the unused default
+init table and the commented-out table are removed and the caller's table is
+required; the RGB order uses rgb_ele_order; every delay is rounded up to a whole
+tick; the pre-ESP-IDF-5 branches, the hal/spi_ll.h include and the SPI
+configuration macros are removed. The driver is compiled only for the
+cheeko-gotchi profile. A copy of the Apache License is in LICENSES/Apache-2.0.txt.

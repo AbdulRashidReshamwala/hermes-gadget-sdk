@@ -28,6 +28,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Espressif ESP32-S3-BOX](hardware.md#esp32-s3-box) | Hold the screen or BOOT to talk | Onboard microphones and speaker. Experimental |
 | [Espressif ESP32-S3-Korvo-2](hardware.md#esp32-s3-korvo-2) | Hold the screen to talk | Onboard microphones and speaker. Needs the LCD sub-board. Experimental |
 | [Espressif ESP32-S3-BOX-3](hardware.md#esp32-s3-box-3) | Hold the screen or BOOT to talk | Onboard microphones and speaker |
+| [Cheeko Gotchi v1.2](hardware.md#cheeko-gotchi-v12) | Hold the screen to talk; swipe down to cancel; the volume keys scroll | Onboard microphones and speaker. Experimental; not run on a board |
 | [M5Stack CoreS3](hardware.md#m5stack-cores3) | Hold the screen to talk | Onboard microphones and speaker; battery management |
 | [M5Stack StickS3](hardware.md#m5stack-sticks3) | Hold KEY1 to talk; KEY2 cancels; face-down sleep | Onboard microphone and speaker; battery. Experimental |
 | [LilyGO T-Display-S3](hardware.md#lilygo-t-display-s3) | BOOT and Button2; send text through the USB console | No onboard microphone or speaker |

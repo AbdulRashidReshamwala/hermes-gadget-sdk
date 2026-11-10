@@ -20,6 +20,7 @@ Have these ready:
 | [Espressif ESP32-S3-BOX](hardware.md#esp32-s3-box) | Hold the screen or BOOT to talk, swipe down to cancel; onboard microphones and speaker; experimental |
 | [Espressif ESP32-S3-Korvo-2](hardware.md#esp32-s3-korvo-2) | Hold the screen to talk, swipe down to cancel; onboard microphones and speaker; needs the LCD sub-board; experimental |
 | [Espressif ESP32-S3-BOX-3](hardware.md#esp32-s3-box-3) | Hold the screen or BOOT to talk, swipe down to cancel; onboard microphones and speaker; experimental |
+| [Cheeko Gotchi v1.2](hardware.md#cheeko-gotchi-v12) | Hold the screen to talk, swipe down to cancel; volume keys scroll; onboard microphones and speaker; experimental, not yet run on a board |
 | [M5Stack CoreS3](hardware.md#m5stack-cores3) | Hold the screen to talk, swipe down to cancel; onboard audio and battery management; experimental |
 | [ESP32-S3 breadboard build](hardware.md) | Wire the display, microphone, buttons, and optional speaker first |
 

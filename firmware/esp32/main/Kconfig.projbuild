@@ -141,6 +141,9 @@ menu "Hermes Gadget"
         config HG_BOARD_WS_P4_TOUCH_LCD_7B
             bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (1024x600 DSI, GT911 touch, ES8311+ES7210 audio, C6 Wi-Fi)"
             depends on IDF_TARGET_ESP32P4
+        config HG_BOARD_CHEEKO_GOTCHI
+            bool "Cheeko Gotchi v1.2 (experimental, JD9853 240x296, CST810, ES8311 + ES7210)"
+            depends on IDF_TARGET_ESP32S3
         config HG_BOARD_CUSTOM
             bool "Custom pins (configure below)"
     endchoice

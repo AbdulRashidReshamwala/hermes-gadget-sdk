@@ -29,6 +29,9 @@ constexpr uint32_t kArmedDozeWaitMs = 1000;
 constexpr uint8_t kTca9554Input = 0x00;
 constexpr uint8_t kCstAck = 0xAB;
 
+// Controllers read through the CST816 report at register 0x02, which share its poll-failure release.
+bool reads_cst816_report(TouchController c) { return c == TouchController::Cst816 || c == TouchController::Cst810; }
+
 }  // namespace
 
 bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, const EncoderConfig& encoder,
@@ -77,6 +80,20 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, c
     if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) == ESP_OK &&
         esp_lcd_touch_new_i2c_spd2010(io, &cfg, &managed_touch_) != ESP_OK) esp_lcd_panel_io_del(io);
     if (managed_touch_ && touch.int_gpio >= 0) gate_on_int();
+  } else if (touch.enabled && touch.controller == TouchController::Cst810) {
+    // The Cheeko Gotchi's CST810 is only ever read (register 0x02) by the code that has run on
+    // it. The generic path below first writes a command-mode register and, for a CST816, drops
+    // the controller when that write is refused: not tried here, so a chip that answers reads
+    // but not that write still works. The address is probed once so the log says what is wrong.
+    if (i2c_master_probe(bus, touch.addr, 50) != ESP_OK) {
+      ESP_LOGW(TAG, "touch controller at 0x%02x did not answer", touch.addr);
+    } else {
+      i2c_device_config_t dev = {};
+      dev.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+      dev.device_address = touch.addr;
+      dev.scl_speed_hz = 400000;
+      if (i2c_master_bus_add_device(bus, &dev, &touch_dev_) != ESP_OK) touch_dev_ = nullptr;
+    }
   } else if (touch.enabled) {
     if (touch.rst >= 0) {
       gpio_config_t rst = {};
@@ -160,6 +177,30 @@ bool TouchInput::read_touch(TouchSample& out) {
     uint8_t points = 0;
     const bool down = esp_lcd_touch_get_coordinates(managed_touch_, &x, &y, nullptr, &points, 1);
     out = {down && points > 0, static_cast<int16_t>(x), static_cast<int16_t>(y)};
+    return true;
+  }
+  if (touch_.controller == TouchController::Cst810) {
+    // The same 5-byte report as the CST816 (count, X high/low, Y high/low), but the glass may
+    // be turned against the display and its range is not the panel's: swap, mirror, then clamp
+    // to the width x height frame instead of rejecting a touch outside it.
+    const uint8_t reg = 0x02;
+    uint8_t data[5] = {};
+    if (i2c_master_transmit_receive(touch_dev_, &reg, 1, data, sizeof(data), 20) != ESP_OK) return false;
+    out.touching = (data[0] & 0x0f) != 0;
+    if (!out.touching) return true;  // the position of a lift is not used
+    int x = ((data[1] & 0x0f) << 8) | data[2];
+    int y = ((data[3] & 0x0f) << 8) | data[4];
+    if (touch_.swap_xy) std::swap(x, y);
+    if (touch_.width) {
+      if (touch_.mirror_x) x = touch_.width - 1 - x;
+      x = std::clamp<int>(x, 0, touch_.width - 1);
+    }
+    if (touch_.height) {
+      if (touch_.mirror_y) y = touch_.height - 1 - y;
+      y = std::clamp<int>(y, 0, touch_.height - 1);
+    }
+    out.x = static_cast<int16_t>(x);
+    out.y = static_cast<int16_t>(y);
     return true;
   }
   if (touch_.controller == TouchController::Cst816) {
@@ -467,17 +508,17 @@ void TouchInput::task(void* arg) {
       if (s.touching || was_touching) {
         const bool posted = events::post(EventType::Touch, &s, sizeof(s));
         // CST816: keep the delivered state until enqueue succeeds, including a lift.
-        if (posted || self->touch_.controller != TouchController::Cst816) was_touching = s.touching;
+        if (posted || !reads_cst816_report(self->touch_.controller)) was_touching = s.touching;
       }
       last = s;
-    } else if (self->touch_.controller == TouchController::Cst816 &&
+    } else if (reads_cst816_report(self->touch_.controller) &&
                fault.release_due(was_touching)) {
       // Five failed polls (~100–200 ms plus scheduler delay): release once.
       // Retry if the event queue is full; do not silently lose the release.
       last.touching = false;
       if (events::post(EventType::Touch, &last, sizeof(last))) {
         was_touching = false;
-        ESP_LOGW(TAG, "CST816 fault: held touch released after five failed polls");
+        ESP_LOGW(TAG, "CST816-family fault: held touch released after five failed polls");
       }
     }
     bool pressed = false;
