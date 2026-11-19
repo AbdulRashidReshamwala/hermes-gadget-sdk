@@ -12,6 +12,7 @@
 //                      when it starts on it), a tap changes the row under it; with a
 //                      hardware check running, a tap and a swipe down are TALK and CANCEL
 //   swipe down         a CANCEL press and release (discard, close, stop, "no")
+//   stroke             on a resting pet face, back and forth or left to right: it enjoys it
 //
 // With the touch_talk setting off, holds and taps press TALK only where it doesn't
 // record (settings, a question, a ringing alarm); elsewhere they do nothing, and the
@@ -49,7 +50,8 @@ class TouchGestures {
   void tick(uint32_t now_ms);
 
  private:
-  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Side, List, ListDrag, Camera, Talk, Swipe, Ignored };
+  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Side, List, ListDrag, Camera, Talk, Swipe, Stroke, Ignored };
+  void start_stroke(int x, int dx, int dy);
   void press(Button b);
   void release(Button b);
 
@@ -60,7 +62,11 @@ class TouchGestures {
   bool on_name_ = false;     // a Pending touch that started on the profile name
   bool from_clock_ = false;  // the touch began on the clock face, which the touch-down ended
   bool in_picker_ = false;   // a Side touch began on the profile grid (turns its page) rather than Ready
-  int dx_ = 0, dy_ = 0;      // a Side touch's travel so far
+  int dx_ = 0, dy_ = 0;      // a Side or Stroke touch's travel so far
+  bool can_pet_ = false;     // the touch began on a resting pet face
+  bool stroked_ = false;     // this touch has counted as a stroke, so it is no swipe
+  int stroke_dir_ = 0;       // +1 moving right, -1 moving left
+  int stroke_far_x_ = 0;     // how far the finger has come this way
   uint32_t t0_ = 0;
 };
 

@@ -78,6 +78,13 @@ class AudioIn {
 // Speaker: begin() a stream, write() mono PCM16 (non-blocking, the port
 // buffers), end() marks end-of-stream. busy() stays true until the buffered
 // audio has played out.
+// What is coming out of the speaker now: the mean sample size and how often the wave
+// crosses zero, per 1000 samples. All zero when silent or when a port doesn't measure it.
+struct PlayingSound {
+  uint16_t level = 0;
+  uint16_t crossings = 0;
+};
+
 class AudioOut {
  public:
   virtual ~AudioOut() = default;
@@ -91,6 +98,7 @@ class AudioOut {
   // Bytes of mono PCM16 the playback buffer holds; 0 when unknown. The hello announces it as
   // caps.speaker.buffer_ms, so the server may send further ahead on a jittery link.
   virtual size_t buffer_bytes() const { return 0; }
+  virtual PlayingSound playing_sound() const { return {}; }
 };
 
 // Decodes compressed speaker audio into mono PCM16. Optional: a device without

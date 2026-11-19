@@ -205,6 +205,11 @@ class App {
   bool open_profile_picker();
   // Whether a sideways swipe that starts now opens the grid: the Ready screen, with profiles to switch to.
   bool profile_swipe_opens() const;
+  // Touch: the resting face can be stroked. pet_stroke() is one stroke; take_talk_for_stroke()
+  // drops the recording a finger began before it turned out to be stroking.
+  bool pet_face_live() const;
+  void pet_stroke();
+  void take_talk_for_stroke();
   // Turns the grid's page: +1 the next, -1 the previous, wrapping around.
   bool profile_page_step(int dir);
   // Profiles a page of the open grid holds on this panel (0: the grid is closed).
@@ -787,6 +792,12 @@ class App {
   int scroll_ = -1;
   uint32_t page_at_ = 0;  // when long text turns its next page
   uint8_t level_ = 0;
+  void speech_tick();  // once a frame: follows what the speaker is playing
+  bool speech_live_ = false;
+  uint16_t speech_peak_ = 0, speech_hz_ = 0;
+  uint8_t speech_level_ = 0, speech_quiet_ = 0;  // quiet: frames in a row without voice
+  uint32_t pet_until_ = 0;
+  uint8_t pet_strokes_ = 0;
   Vad vad_;
   std::vector<uint8_t> frame_buf_;
   std::vector<int16_t> pcm_buf_;

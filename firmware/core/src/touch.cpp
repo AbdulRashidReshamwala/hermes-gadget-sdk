@@ -8,10 +8,21 @@ namespace {
 // Past this, a lift that is still Pending ends a hold rather than a tap. Generous next to
 // hold_ms, so a slow tap on the name still opens the grid when touch_talk is off.
 constexpr uint32_t kTapMaxMs = 400;
+// A finger that started as TALK, but moved this far sideways this soon, is stroking instead.
+constexpr uint32_t kStrokeFromTalkMs = 600;
+constexpr int kStrokeFromTalkSlop = 2;  // times slop_px: speaking fingers drift a little
 }  // namespace
 
 void TouchGestures::press(Button b) { app_.on_button(b, true, true); }
 void TouchGestures::release(Button b) { app_.on_button(b, false, true); }
+
+void TouchGestures::start_stroke(int x, int dx, int dy) {
+  state_ = State::Stroke;
+  stroked_ = false;
+  stroke_dir_ = dx > 0 ? 1 : -1;
+  stroke_far_x_ = x;
+  dx_ = dx, dy_ = dy;
+}
 
 void TouchGestures::tick(uint32_t now_ms) {
   if (state_ == State::Settings && now_ms - t0_ >= 1000) {
@@ -54,6 +65,10 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         }
         break;
       case State::Talk: release(Button::Talk); break;
+      case State::Stroke:  // one clean swipe from right to left is still the profile grid
+        if (!stroked_ && dx_ <= -cfg_.swipe_px && std::abs(dx_) > 2 * std::abs(dy_) && app_.profile_swipe_opens())
+          app_.open_profile_picker();
+        break;
       case State::Swipe: release(Button::Cancel); break;
       default: break;
     }
@@ -76,6 +91,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
               : State::Pending;
     if (state_ == State::List) app_.settings_press(x, y);
     on_name_ = !from_clock_ && state_ == State::Pending && app_.profile_name_hit(x, y);
+    can_pet_ = !from_clock_ && state_ == State::Pending && app_.pet_face_live();
     x0_ = x;
     y0_ = y;
     t0_ = now_ms;
@@ -136,7 +152,9 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       } else if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
         // Neither a hold nor a downward swipe yet: one from right to left may open the profile
         // grid; wait for a clear swipe, else ignore.
-        if (dx < 0 && std::abs(dx) >= std::abs(dy) && !from_clock_ && app_.profile_swipe_opens()) {
+        if (can_pet_ && std::abs(dx) >= std::abs(dy)) {
+          start_stroke(x, dx, dy);
+        } else if (dx < 0 && std::abs(dx) >= std::abs(dy) && !from_clock_ && app_.profile_swipe_opens()) {
           state_ = State::Side;
           in_picker_ = false;
           dx_ = dx, dy_ = dy;
@@ -155,6 +173,25 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         press(Button::Cancel);
         release(Button::Cancel);
         release(Button::Talk);
+      } else if (can_pet_ && now_ms - t0_ < kStrokeFromTalkMs && std::abs(dx) > kStrokeFromTalkSlop * cfg_.slop_px &&
+                 std::abs(dx) >= std::abs(dy)) {
+        app_.take_talk_for_stroke();
+        start_stroke(x, dx, dy);
+      }
+      break;
+    case State::Stroke:
+      dx_ = dx, dy_ = dy;
+      if ((x - stroke_far_x_) * stroke_dir_ > 0) {
+        stroke_far_x_ = x;
+      } else if (std::abs(x - stroke_far_x_) > cfg_.slop_px) {  // turned back: that is a stroke
+        stroke_dir_ = -stroke_dir_;
+        stroke_far_x_ = x;
+        stroked_ = true;
+        app_.pet_stroke();
+      }
+      if (!stroked_ && dx >= cfg_.swipe_px) {  // left to right does nothing else, so it counts at once
+        stroked_ = true;
+        app_.pet_stroke();
       }
       break;
     default: break;

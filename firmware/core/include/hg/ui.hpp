@@ -88,6 +88,12 @@ struct UiModel {
   int scroll = -1;       // first visible body line; -1 pins to the end
   uint8_t level = 0;     // microphone level 0..100
   bool speaking = false;
+  bool working = false;       // a reply has started, Hermes is still at it, and nothing is playing
+  bool speech_live = false;   // the speech_ fields below follow the audio being played
+  bool speech_rest = false;   // a pause in the speech long enough to smile through
+  uint8_t speech_level = 0;   // loudness 0..100, relative to this reply's loudest
+  uint16_t speech_hz = 0;     // how bright the sound is: high for "s" and "ee", low for "oh"
+  uint8_t petting = 0;        // 0 no, 1 being stroked, 2 stroked for a while
   bool color_test = false;
   bool settings_hold = true;  // round panels draw the settings target only while holding it works
   // Battery level, in the top bar (round panels: centred at the top edge, above

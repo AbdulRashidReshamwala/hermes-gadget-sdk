@@ -61,6 +61,10 @@ constexpr uint32_t kManualScrollPauseMs = 15000;  // UP/DOWN pauses automatic pa
 constexpr uint8_t kCaptionLines = 3;          // detail lines on pairing, setup and card screens
 constexpr uint8_t kPromptLines = 4;           // ...and on a question (the renderer drops lines on small screens)
 constexpr uint32_t kFrameMs = 100;
+constexpr uint32_t kSpeechPeakFloor = 400;  // quieter than this never fills the mouth
+constexpr uint32_t kPetLingerMs = 1600;     // the happy face after the last stroke
+constexpr uint8_t kPetBlissStrokes = 5;
+constexpr uint8_t kSpeechRestFrames = 5;    // about half a second of quiet
 constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
 constexpr int kDashboardVersion = 1;    // the dashboard message this firmware draws
@@ -1628,7 +1632,13 @@ void App::on_button(Button button, bool pressed, bool touch) {
         if (prompt_armed(cancel_down_at_)) answer_prompt(false);
       } else if (mode_ == Mode::Listening) cancel_listening("cancelled");
       else if (overlay_ != Overlay::None) dismiss_overlay();
-      else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
+      else if (mode_ == Mode::Responding && ui_ && ui_->area().pet && !reply_.empty()) {
+        // The face hides the reply: a swipe down brings its text up (and puts it away), the reply going on.
+        reply_wanted_ = !reply_wanted_;
+        reply_until_ = now() + kReplyLingerMs;
+        scroll_ = 0;
+        page_at_ = now() + page_dwell_ms();
+      } else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
       else if (ui_ && ui_->area().pet && (reply_wanted_ || !reply_.empty())) {
         // The face stays up after a reply: a swipe down brings the text, and another puts it away.
         reply_wanted_ = !reply_wanted_;
@@ -2438,9 +2448,45 @@ void App::tick() {
     frame_at_ = t;
     // The port's time of day feeds the clock face; read once per frame.
     wall_valid_ = hal_.system && hal_.system->wall_time(wall_);
+    speech_tick();
     ++model_.frame;
     update_model();
   }
+}
+
+void App::speech_tick() {
+  if (!speaking()) {
+    speech_live_ = false;
+    speech_peak_ = speech_level_ = speech_quiet_ = 0;
+    return;
+  }
+  const PlayingSound sound = hal_.speaker->playing_sound();
+  speech_live_ = speech_live_ || sound.level;
+  // Loudness against the reply's own recent peak, so any voice uses the whole mouth.
+  speech_peak_ = static_cast<uint16_t>(std::max<uint32_t>({sound.level, speech_peak_ * 97u / 100u, kSpeechPeakFloor}));
+  const int loud = std::min(100, sound.level * 100 / speech_peak_);
+  speech_level_ = static_cast<uint8_t>(loud > speech_level_ ? (speech_level_ + 3 * loud) / 4 : (speech_level_ + loud) / 2);
+  speech_hz_ = static_cast<uint16_t>(sound.crossings * static_cast<uint32_t>(in_rate_) / 2000u);
+  speech_quiet_ = loud >= 12 ? uint8_t(0) : static_cast<uint8_t>(std::min(speech_quiet_ + 1, 255));
+}
+
+bool App::pet_face_live() const {
+  return ui_ && ui_->area().pet && !display_sleeping_ && model_.screen == Screen::Ready && model_.face_only &&
+         mode_ == Mode::Idle && overlay_ == Overlay::None && !settings_open() && !camera_open_;
+}
+
+void App::pet_stroke() {
+  if (static_cast<int32_t>(pet_until_ - now()) <= 0) pet_strokes_ = 0;
+  pet_strokes_ = static_cast<uint8_t>(std::min(pet_strokes_ + 1, 255));
+  pet_until_ = now() + kPetLingerMs;
+  activity_at_ = now();
+  update_model();
+}
+
+void App::take_talk_for_stroke() {
+  if (mode_ == Mode::Listening) cancel_listening("cancelled");
+  talk_held_ = false;
+  update_model();
 }
 
 void App::update_model() {
@@ -2467,6 +2513,12 @@ void App::update_model() {
   m.scroll = scroll_;
   m.level = level_;
   m.speaking = speaking();
+  m.working = mode_ == Mode::Responding && !m.speaking && !turn_done_;
+  m.speech_live = speech_live_;
+  m.speech_rest = speech_quiet_ >= kSpeechRestFrames;
+  m.speech_level = speech_level_;
+  m.speech_hz = speech_hz_;
+  m.petting = 0;
   m.color_test = false;
   m.settings_hold = settings_hold_live();
   m.timer_permille = timer_permille();
@@ -2764,7 +2816,7 @@ void App::update_model() {
       }
       m.detail = caption_;
     }
-    if (ui_ && ui_->area().pet) m.hero = true;
+    if (ui_ && ui_->area().pet) m.hero = !reply_wanted_ || reply_.empty();
   } else {
     m.screen = Screen::Ready;
     m.headline = tr(Msg::Ready);
@@ -2822,6 +2874,8 @@ void App::update_model() {
       (m.screen == Screen::Ready || m.screen == Screen::Listening || m.screen == Screen::Thinking ||
        m.screen == Screen::Responding)) {
     m.face_only = true;
+    if (m.screen == Screen::Ready && static_cast<int32_t>(pet_until_ - now()) > 0)
+      m.petting = pet_strokes_ >= kPetBlissStrokes ? 2 : 1;
     m.headline.clear();
     m.detail.clear();
     m.hint.clear();

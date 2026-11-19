@@ -3,6 +3,7 @@
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 #include "driver/i2s_std.h"
@@ -197,6 +198,7 @@ void I2sSpeaker::task(void* arg) {
     if (self->flush_) {
       gaps.finish();  // an aborted stream isn't reported
       xStreamBufferReset(self->buffer_);
+      self->sound_ = 0;
       if (enabled) {
         i2s_channel_disable(self->tx_);
         enabled = false;
@@ -206,6 +208,7 @@ void I2sSpeaker::task(void* arg) {
     size_t got = xStreamBufferReceive(self->buffer_, chunk, sizeof(chunk), pdMS_TO_TICKS(20));
     if (self->flush_) continue;  // received while an abort() waits for its reset: old audio
     if (got == 0) {
+      self->sound_ = 0;
       if (enabled && self->open_) gaps.ran_dry(speaker_now_ms());
       if (self->draining_ && !self->open_) {
         self->draining_ = false;  // everything queued has been written out
@@ -228,6 +231,13 @@ void I2sSpeaker::task(void* arg) {
       enabled = true;
     }
     size_t n = got / sizeof(int16_t);
+    // Measured before the volume, so the face moves the same at any volume.
+    uint32_t sum = 0, crossings = 0;
+    for (size_t i = 0; i < n; ++i) {
+      sum += static_cast<uint32_t>(std::abs(static_cast<int>(chunk[i])));
+      if (i && (chunk[i] ^ chunk[i - 1]) < 0) ++crossings;
+    }
+    if (n) self->sound_ = (std::min<uint32_t>(sum / n, 65535) << 16) | static_cast<uint16_t>(crossings * 1000 / n);
     int vol = self->volume_.load();
     for (size_t i = 0; i < n; ++i) chunk[i] = static_cast<int16_t>(chunk[i] * vol / 100);
     size_t written = 0;

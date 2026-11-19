@@ -109,7 +109,8 @@ if [ -n "$host" ]; then
   echo "Uploading $image to $host..."
   scp -q "$image" "$host:$image_there"
   [ "$use_sudo" -eq 0 ] || echo "Type your sudo password. Nothing shows while you type; that is normal."
-  ssh -t "$host" "$command"
+  # The install prints nothing for minutes; keepalives hold the quiet connection open.
+  ssh -t -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$host" "$command"
 else
   sh -c "$command"
 fi

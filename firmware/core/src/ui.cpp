@@ -251,14 +251,59 @@ struct PixelFace {
   int8_t right_h = -1;                // the right eye's height when it differs, or -1
   int8_t lift = 0;                    // half cells the whole face rises by
   int16_t trail = -1;                 // thinking: head of the trail around the face, or -1
+  int8_t heart = -1, heart2 = -1;     // petting: how far a heart has risen (0 to 7), or -1
+  int8_t dots = -1;                   // working: which of three dots is up (3: none), or -1 for no dots
   uint8_t bars[6] = {0, 0, 0, 0, 0, 0};  // listening: equaliser heights in quarter cells, 0 for none
   bool tongue = false;
   bool cheeks = true;
 };
 
+// Hermes at work, in three moods that take turns over twelve seconds: pondering while dots
+// type out beside it, reading with narrowed eyes as a trail runs around the face, and a
+// doubtful squint.
+void working_face(PixelFace& face, uint32_t f) {
+  const uint32_t phase = f % 120;
+  face.mouth = PixelFace::Mouth::Flat;
+  face.mouth_w = 1;
+  if (phase < 48) {
+    face.dx = 1;
+    face.dy = -1;
+    face.eye_h = 4;
+    face.dots = static_cast<int8_t>((f / 3) % 4);  // 3: a beat with all three down
+  } else if (phase < 96) {
+    static constexpr int8_t kRead[6] = {-2, -1, 0, 1, 2, 2};  // along a line, then back
+    face.dx = kRead[(f / 3) % 6];
+    face.eye_h = 3;
+    face.mouth_w = 2;
+    face.trail = static_cast<int16_t>((f * 2) % 68);
+  } else {
+    face.dx = -1;
+    face.dy = -1;
+    face.tilt = 1;
+    face.right_h = 2;
+    face.dots = static_cast<int8_t>((f / 3) % 4);
+  }
+}
+
 PixelFace pixel_face(const UiModel& m) {
   const uint32_t f = m.animate ? m.frame : 0;
   PixelFace face;
+  if (m.petting && m.screen == Screen::Ready) {
+    // Eyes shut with pleasure, swaying and bobbing under the hand, hearts floating up.
+    static constexpr int8_t kSway[4] = {-1, 0, 1, 0};
+    face.eyes = PixelFace::Eyes::Happy;
+    face.dx = kSway[(f / 3) % 4];
+    face.lift = (f / 2) % 2 ? 1 : 0;
+    face.heart = static_cast<int8_t>((f / 2) % 8);
+    if (m.petting >= 2) {
+      face.mouth = PixelFace::Mouth::Open;
+      face.mouth_w = 2;
+      face.mouth_h = 2;
+      face.tongue = true;
+      face.heart2 = static_cast<int8_t>(((f / 2) + 4) % 8);
+    }
+    return face;
+  }
   switch (m.screen) {
     case Screen::Listening: {
       // A curious tilt, eyes that open with a louder voice, and a mouth that is the sound itself.
@@ -274,20 +319,23 @@ PixelFace pixel_face(const UiModel& m) {
       }
       break;
     }
-    case Screen::Thinking: {
-      // Eyes wander upward, one narrowing in turn, while a trail runs around the face.
-      static constexpr int8_t kGlance[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
-      face.dx = kGlance[(f / 7) % 8];
-      face.dy = -1;
-      face.eye_h = (f / 28) % 2 ? 3 : 5;
-      face.right_h = (f / 28) % 2 ? 5 : 3;
-      face.mouth = PixelFace::Mouth::Flat;
-      face.mouth_w = 2;
-      face.trail = static_cast<int16_t>((f * 2) % 68);
-      break;
-    }
+    case Screen::Thinking: working_face(face, f); break;
     case Screen::Responding:
-      if (m.speaking) {
+      if (m.speaking && m.speech_live) {
+        if (m.speech_rest) {  // a real pause: a smile until the voice comes back
+          face.eyes = PixelFace::Eyes::Happy;
+          break;
+        }
+        // The mouth is the voice: its height the loudness, its width how bright the sound is.
+        const int h = m.speech_level < 14 ? 0 : m.speech_level < 38 ? 1 : m.speech_level < 68 ? 2 : 3;
+        const int w = h == 0 ? 2 : m.speech_hz >= 1300 ? 4 : m.speech_hz <= 450 ? 2 : 3;
+        face.mouth_w = static_cast<int8_t>(w);
+        face.mouth_h = static_cast<int8_t>(std::max(w == 4 ? std::min(h, 2) : h, 1));
+        face.mouth = h ? PixelFace::Mouth::Open : PixelFace::Mouth::Flat;
+        face.tongue = h >= 3 && w < 4;
+        face.lift = h >= 3 ? 1 : 0;
+        if (m.speech_level >= 85) face.eye_h = 6;
+      } else if (m.speaking) {
         // Mouth shapes in the rhythm of speech: width, height (0 is a closed line), then a rest.
         struct Shape {
           int8_t w, h;
@@ -303,6 +351,8 @@ PixelFace pixel_face(const UiModel& m) {
         face.lift = shape.h >= 3 ? 1 : 0;
         // Bright, and every so often a smile of the eyes.
         if ((f / 2) % 48 >= 40) face.eyes = PixelFace::Eyes::Happy;
+      } else if (m.working) {  // part of the reply is in, and Hermes is still on it
+        working_face(face, f);
       } else {
         face.eyes = PixelFace::Eyes::Happy;
       }
@@ -344,7 +394,8 @@ PixelFace pixel_face(const UiModel& m) {
 uint32_t pixel_face_key(const PixelFace& face) {
   Hash hash;
   hash.val(face.eyes).val(face.mouth).val(face.eye_h).val(face.dx).val(face.dy).val(face.mouth_w).val(face.mouth_h)
-      .val(face.tilt).val(face.right_h).val(face.lift).val(face.trail).val(face.tongue).val(face.cheeks);
+      .val(face.tilt).val(face.right_h).val(face.lift).val(face.trail).val(face.tongue).val(face.cheeks)
+      .val(face.heart).val(face.heart2).val(face.dots);
   for (uint8_t bar : face.bars) hash.val(bar);
   return hash.get();
 }
@@ -398,6 +449,20 @@ void draw_pixel_face(Canvas& c, const FaceArea& area, const PixelFace& face) {
       break;
     case PixelFace::Mouth::None: break;
   }
+  const auto heart = [&](int x, int rise) {
+    // Five by four half cells, rising from beside the eyes to the top of the face.
+    static constexpr uint8_t kRows[4] = {0b01010, 0b11111, 0b01110, 0b00100};
+    const int px = std::max(a.cell / 2, 1), left = a.cx + x * a.cell, top = a.cy + (-4 - rise / 2) * a.cell;
+    for (int row = 0; row < 4; ++row)
+      for (int col = 0; col < 5; ++col)
+        if (kRows[row] >> (4 - col) & 1) c.fill_rect(left + col * px, top + row * px, px, px, kOrange);
+  };
+  if (face.dots >= 0) {
+    // Three dots up and to the right, the one in turn hopping up a cell, like someone typing.
+    for (int i = 0; i < 3; ++i) cells(9 + 2 * i, i == face.dots ? -8 : -7, 1, 1, kOrange);
+  }
+  if (face.heart >= 0) heart(10, face.heart);
+  if (face.heart2 >= 0) heart(-13, face.heart2);
   static constexpr int kBarX[6] = {-6, -4, -2, 1, 3, 5};
   for (int i = 0; i < 6; ++i) {
     if (!face.bars[i]) continue;

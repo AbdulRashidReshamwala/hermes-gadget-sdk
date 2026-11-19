@@ -336,6 +336,10 @@ class I2sSpeaker final : public hg::AudioOut {
   bool busy() const override;
   void set_volume(uint8_t percent) override { volume_ = percent; }
   size_t buffer_bytes() const override { return capacity_; }
+  hg::PlayingSound playing_sound() const override {
+    const uint32_t sound = sound_.load();
+    return {static_cast<uint16_t>(sound >> 16), static_cast<uint16_t>(sound)};
+  }
 
  private:
   static void task(void* arg);
@@ -347,6 +351,7 @@ class I2sSpeaker final : public hg::AudioOut {
   std::atomic<bool> draining_{false};
   std::atomic<bool> flush_{false};
   std::atomic<uint8_t> volume_{70};
+  std::atomic<uint32_t> sound_{0};  // level << 16 | crossings
 };
 
 #if SOC_MIPI_DSI_SUPPORTED
